@@ -1,4 +1,4 @@
-name: Ksunati
+name: 🏭 Kernel Fabrikası
 
 on:
   workflow_dispatch:
@@ -35,4 +35,78 @@ jobs:
     - name: 📦 Ortamı Hazırla
       run: |
         sudo apt-get update
-        sudo apt-get install -y git bc bison flex build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-
+        sudo apt-get install -y git bc bison flex build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio wget
+        
+        # 🔥 KRİTİK HAMLE: Yeni sistemde (22.04) olmayan eski SSL kütüphanesini elle kuruyoruz.
+        # Bunu yapmazsak kernel derlenirken "openssl bulunamadı" hatası verir.
+        wget http://nz2.archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+        sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+        
+    - name: 📥 Kernel Kaynağını Çek
+      run: |
+        git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
+
+    - name: 🛠️ Root Entegre Et
+      working-directory: android_kernel
+      run: |
+        echo "Seçilen Yöntem: ${{ inputs.ROOT_METHOD }}"
+        
+        if [ "${{ inputs.ROOT_METHOD }}" == "KernelSU" ]; then
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+            
+        elif [ "${{ inputs.ROOT_METHOD }}" == "KernelSU-Next" ]; then
+            curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
+            
+        elif [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
+            git clone https://github.com/bmax121/APatch drivers/apatch
+        fi
+
+    - name: 🔧 Toolchain (Proton Clang)
+      run: |
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+    - name: 🔥 Derlemeyi Başlat
+      working-directory: android_kernel
+      run: |
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC=clang
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        
+        # yylloc hatası (multiple definition) için koruma kalkanı
+        export HOSTCFLAGS="-fcommon"
+        export HOSTLDFLAGS="-fcommon"
+        
+        # 1. Config dosyasını oluştur
+        make O=out ${{ inputs.DEFCONFIG_NAME }}
+        
+        # 2. Samsung temizliği (Whitelist hatası için)
+        sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
+        sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=""/g' out/.config
+        
+        # 3. Root ayarlarını işle
+        if [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
+            echo "CONFIG_APATCH=y" >> out/.config
+        elif [ "${{ inputs.ROOT_METHOD }}" != "None" ]; then
+            echo "CONFIG_KSU=y" >> out/.config
+        fi
+
+        # 4. Otomatik cevaplama (Eksik soruları Enter'a basmış gibi geçer)
+        make O=out olddefconfig
+
+        # 5. Derle
+        make O=out -j$(nproc --all) \
+            LLVM=1 \
+            LLVM_IAS=1
+
+    - name: 📤 Sonucu Paketle
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-${{ inputs.ROOT_METHOD }}
+        path: |
+          android_kernel/out/arch/arm64/boot/Image*
+          android_kernel/out/arch/arm64/boot/*.dtb
+          android_kernel/out/arch/arm64/boot/*.gz
