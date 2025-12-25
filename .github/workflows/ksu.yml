@@ -1,0 +1,38 @@
+name: Kernel Derleme
+
+on:
+  push:
+    branches: [ "main" ] # Main'e bişey atınca tetiklenir
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04 # Rehberdeki ortamın aynısı
+
+    steps:
+    - name: Repoyu Çek
+      uses: actions/checkout@v3
+
+    - name: Gerekli Paketleri Yükle (Rehberdeki liste)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git clang g++ bc llvm make build-essential libncurses-dev bison flex libssl-dev libelf-dev zip lld
+
+    - name: Toolchainleri İndir
+      run: |
+        # Rehberdeki toolchain linklerini buraya git clone ile ekleyeceksin
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+        # Veya adamın kullandığı aarch64-linux-gnu
+
+    - name: Derlemeyi Başlat
+      run: |
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        # Buraya make komutları gelecek (defconfig ve build)
+
+    - name: Çıkan Zipleri Yükle (Artifact)
+      uses: actions/upload-artifact@v3
+      with:
+        name: Mis-Gibi-Kernel
+        path: out/arch/arm64/boot/Image.gz-dtb # Veya çıkan zip nerede oluşuyorsa
+        
