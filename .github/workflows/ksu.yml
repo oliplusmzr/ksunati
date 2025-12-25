@@ -6,19 +6,19 @@ on:
       KERNEL_REPO:
         description: 'Kernel Kaynak Linki (Git URL)'
         required: true
-        default: 'https://github.com/kullanici/cihaz_kernel'
+        default: 'https://github.com/oliplusmzr/android_kernel_samsung_a24'
       KERNEL_BRANCH:
         description: 'Branch (Dal) Adı'
         required: true
-        default: 'main'
+        default: 'OSRC'
       DEFCONFIG_NAME:
-        description: 'Defconfig Dosya Adı (Örn: vendor_cepheus_defconfig)'
+        description: 'Defconfig Dosya Adı'
         required: true
-        default: 'vendor_cepheus_defconfig'
+        default: 'a24_defconfig'
       ROOT_METHOD:
         description: 'Root Yöntemi Seç'
         required: true
-        default: 'KernelSU'
+        default: 'KernelSU-Next'
         type: choice
         options:
         - None
@@ -34,7 +34,8 @@ jobs:
     - name: 📦 Ortamı Hazırla
       run: |
         sudo apt-get update
-        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev
+        # BURASI GÜNCELLENDİ: gcc-aarch64 ve arm-linux eklendi
+        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
         
     - name: 📥 Kernel Kaynağını Çek
       run: |
@@ -55,7 +56,6 @@ jobs:
             
         elif [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
             git clone https://github.com/bmax121/APatch drivers/apatch
-            # APatch manuel ayar gerektirebilir ama basic ekleme yapıyoruz
             echo "CONFIG_APATCH=y" >> arch/arm64/configs/${{ inputs.DEFCONFIG_NAME }}
         fi
 
