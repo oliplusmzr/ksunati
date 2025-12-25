@@ -1,14 +1,14 @@
-name: 🏭 Kernel Fabrikası
+name: ksunati
 
 on:
   workflow_dispatch:
     inputs:
       KERNEL_REPO:
-        description: 'Kernel Kaynak Linki (Git URL)'
+        description: 'Kernel Kaynak Linki'
         required: true
         default: 'https://github.com/oliplusmzr/android_kernel_samsung_a24'
       KERNEL_BRANCH:
-        description: 'Branch (Dal) Adı'
+        description: 'Branch Adı'
         required: true
         default: 'OSRC'
       DEFCONFIG_NAME:
@@ -16,7 +16,7 @@ on:
         required: true
         default: 'a24_defconfig'
       ROOT_METHOD:
-        description: 'Root Yöntemi Seç'
+        description: 'Root Yöntemi'
         required: true
         default: 'KernelSU-Next'
         type: choice
@@ -28,22 +28,25 @@ on:
 
 jobs:
   build:
-    # 🔥 HIZLI MAKİNE: Ubuntu 22.04 (Sıra bekleme derdi yok)
+    # Hızlı açılan makineyi (22.04) kullanıyoruz
     runs-on: ubuntu-22.04
     
+    # Ama işi "Container" içinde yapıyoruz (Eski ortam - 20.04)
+    container:
+      image: ubuntu:20.04
+    
     steps:
-    - name: 📦 Ortamı Hazırla
+    - name: 📦 Ortamı Hazırla (Container İçi)
       run: |
-        sudo apt-get update
-        sudo apt-get install -y git bc bison flex build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio wget
-        
-        # 🔥 KRİTİK HAMLE: Yeni sistemde (22.04) olmayan eski SSL kütüphanesini elle kuruyoruz.
-        # Bunu yapmazsak kernel derlenirken "openssl bulunamadı" hatası verir.
-        wget http://nz2.archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-        sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
+        # Docker içinde olduğumuz için önce update
+        apt-get update
+        # Timezone sorusunu atlamak için ayar
+        DEBIAN_FRONTEND=noninteractive apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio wget curl kmod
         
     - name: 📥 Kernel Kaynağını Çek
       run: |
+        # GitHub Actions güvenliği için dizini güvenli ilan et
+        git config --global --add safe.directory $GITHUB_WORKSPACE
         git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
 
     - name: 🛠️ Root Entegre Et
@@ -75,25 +78,25 @@ jobs:
         export CC=clang
         export CLANG_TRIPLE=aarch64-linux-gnu-
         
-        # yylloc hatası (multiple definition) için koruma kalkanı
+        # yylloc Fix
         export HOSTCFLAGS="-fcommon"
         export HOSTLDFLAGS="-fcommon"
         
-        # 1. Config dosyasını oluştur
+        # 1. Config Oluştur
         make O=out ${{ inputs.DEFCONFIG_NAME }}
         
-        # 2. Samsung temizliği (Whitelist hatası için)
+        # 2. Samsung Temizliği
         sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
         sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=""/g' out/.config
         
-        # 3. Root ayarlarını işle
+        # 3. Root Ayarları
         if [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
             echo "CONFIG_APATCH=y" >> out/.config
         elif [ "${{ inputs.ROOT_METHOD }}" != "None" ]; then
             echo "CONFIG_KSU=y" >> out/.config
         fi
 
-        # 4. Otomatik cevaplama (Eksik soruları Enter'a basmış gibi geçer)
+        # 4. Otomatik Cevaplama
         make O=out olddefconfig
 
         # 5. Derle
