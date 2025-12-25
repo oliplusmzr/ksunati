@@ -1,4 +1,4 @@
-name: ksunati
+name: Ksunati
 
 on:
   workflow_dispatch:
@@ -28,81 +28,89 @@ on:
 
 jobs:
   build:
-    # Hızlı açılan makineyi (22.04) kullanıyoruz
     runs-on: ubuntu-22.04
     
-    # Ama işi "Container" içinde yapıyoruz (Eski ortam - 20.04)
-    container:
-      image: ubuntu:20.04
-    
     steps:
-    - name: 📦 Ortamı Hazırla (Container İçi)
-      run: |
-        # Docker içinde olduğumuz için önce update
-        apt-get update
-        # Timezone sorusunu atlamak için ayar
-        DEBIAN_FRONTEND=noninteractive apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio wget curl kmod
-        
-    - name: 📥 Kernel Kaynağını Çek
-      run: |
-        # GitHub Actions güvenliği için dizini güvenli ilan et
-        git config --global --add safe.directory $GITHUB_WORKSPACE
-        git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
+    - name: 📥 Kaynak Kodları Çek
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.KERNEL_REPO }}
+        ref: ${{ inputs.KERNEL_BRANCH }}
+        path: android_kernel
+        fetch-depth: 1
 
-    - name: 🛠️ Root Entegre Et
-      working-directory: android_kernel
+    - name: 🐳 Docker ile Derle (Tam Yetkili)
       run: |
-        echo "Seçilen Yöntem: ${{ inputs.ROOT_METHOD }}"
+        # Klasör izinlerini herkesin erişebileceği hale getir
+        chmod -R 777 android_kernel
         
-        if [ "${{ inputs.ROOT_METHOD }}" == "KernelSU" ]; then
-            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        # Docker'ı başlatıyoruz
+        docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
+            # 1. Paketleri Güncelle ve Kur
+            echo '📦 Paketler Kuruluyor...'
+            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
+            libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio \
+            wget curl kmod ca-certificates python2 python3
             
-        elif [ "${{ inputs.ROOT_METHOD }}" == "KernelSU-Next" ]; then
-            curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
+            # Python ayarı (Eski kerneller python2 isteyebilir)
+            ln -sf /usr/bin/python2 /usr/bin/python
             
-        elif [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
-            git clone https://github.com/bmax121/APatch drivers/apatch
-        fi
+            # 2. Git Güvenlik Ayarı (HAYAT KURTARAN HAMLE)
+            git config --global --add safe.directory '*'
+            git config --global --add safe.directory /kernel
+            
+            cd /kernel
+            
+            # 3. Root Yöntemini Kur
+            echo '🛠️ Root Yöntemi: ${{ inputs.ROOT_METHOD }}'
+            if [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU' ]; then
+                curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
+            elif [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU-Next' ]; then
+                curl -LSs 'https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh' | bash -
+            elif [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
+                git clone https://github.com/bmax121/APatch drivers/apatch
+            fi
 
-    - name: 🔧 Toolchain (Proton Clang)
-      run: |
-        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+            # 4. Toolchain İndir
+            echo '🔧 Toolchain İndiriliyor...'
+            git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-    - name: 🔥 Derlemeyi Başlat
-      working-directory: android_kernel
-      run: |
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CC=clang
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        
-        # yylloc Fix
-        export HOSTCFLAGS="-fcommon"
-        export HOSTLDFLAGS="-fcommon"
-        
-        # 1. Config Oluştur
-        make O=out ${{ inputs.DEFCONFIG_NAME }}
-        
-        # 2. Samsung Temizliği
-        sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
-        sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=""/g' out/.config
-        
-        # 3. Root Ayarları
-        if [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
-            echo "CONFIG_APATCH=y" >> out/.config
-        elif [ "${{ inputs.ROOT_METHOD }}" != "None" ]; then
-            echo "CONFIG_KSU=y" >> out/.config
-        fi
+            # Ortam Değişkenleri
+            export PATH=/kernel/clang/bin:\$PATH
+            export ARCH=arm64
+            export SUBARCH=arm64
+            export CROSS_COMPILE=aarch64-linux-gnu-
+            export CC=clang
+            export CLANG_TRIPLE=aarch64-linux-gnu-
+            
+            # Hata Önleyiciler
+            export HOSTCFLAGS='-fcommon'
+            export HOSTLDFLAGS='-fcommon'
+            # KCFLAGS=-w : Uyarıları hata olarak görme (Werror kapatır)
+            export KCFLAGS='-w' 
 
-        # 4. Otomatik Cevaplama
-        make O=out olddefconfig
-
-        # 5. Derle
-        make O=out -j$(nproc --all) \
-            LLVM=1 \
-            LLVM_IAS=1
+            # 5. Config ve Temizlik
+            echo '⚙️ Config: ${{ inputs.DEFCONFIG_NAME }}'
+            make O=out ${{ inputs.DEFCONFIG_NAME }}
+            
+            echo '🧹 Samsung Temizliği...'
+            sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
+            sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=\"\"/g' out/.config
+            
+            # Root Config Ekleme
+            if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
+                echo 'CONFIG_APATCH=y' >> out/.config
+            elif [ '${{ inputs.ROOT_METHOD }}' != 'None' ]; then
+                echo 'CONFIG_KSU=y' >> out/.config
+            fi
+            
+            make O=out olddefconfig
+            
+            # 6. Derleme (Ateşle!)
+            echo '🔥 DERLEME BAŞLIYOR...'
+            make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
+        "
 
     - name: 📤 Sonucu Paketle
       if: success()
