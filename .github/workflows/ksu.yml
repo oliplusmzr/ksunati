@@ -4,19 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       KERNEL_REPO:
-        description: 'Kernel Kaynak Linki (Git URL)'
+        description: 'Kernel Git Linkini Yapıştır'
         required: true
         default: 'https://github.com/kullanici/cihaz_kernel'
       KERNEL_BRANCH:
-        description: 'Branch (Dal) Adı'
+        description: 'Branch Adı (main, master vs.)'
         required: true
         default: 'main'
-      DEFCONFIG_NAME:
-        description: 'Defconfig Dosya Adı (Örn: vendor_cepheus_defconfig)'
-        required: true
-        default: 'vendor_cepheus_defconfig'
       ROOT_METHOD:
-        description: 'Root Yöntemi Seç'
+        description: 'Hangi Root Yöntemi Çakılsın?'
         required: true
         default: 'KernelSU'
         type: choice
@@ -31,39 +27,44 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: 📦 Ortamı Hazırla
+    - name: Ortam Hazırlığı (Güncelleme & Paketler)
       run: |
         sudo apt-get update
-        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev
-        
-    - name: 📥 Kernel Kaynağını Çek
+        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5
+        # Buraya senin kernel için gereken diğer paketleri eklersin
+
+    - name: Kernel Kaynağını Çek
       run: |
         git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
-
-    - name: 🛠️ Root Entegre Et
+        
+    - name: 🛠️ Root Yöntemini Entegre Et
       working-directory: android_kernel
       run: |
         echo "Seçilen Yöntem: ${{ inputs.ROOT_METHOD }}"
         
         if [ "${{ inputs.ROOT_METHOD }}" == "KernelSU" ]; then
+            echo "KernelSU Orijinal Kuruluyor..."
             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-            echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ inputs.DEFCONFIG_NAME }}
             
         elif [ "${{ inputs.ROOT_METHOD }}" == "KernelSU-Next" ]; then
+            echo "KernelSU-Next (Fork) Kuruluyor..."
             curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -
-            echo "CONFIG_KSU=y" >> arch/arm64/configs/${{ inputs.DEFCONFIG_NAME }}
             
         elif [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
+            echo "APatch Kuruluyor..."
+            # APatch entegrasyonu genelde submodule veya patch ile olur, örnek komut:
             git clone https://github.com/bmax121/APatch drivers/apatch
-            # APatch manuel ayar gerektirebilir ama basic ekleme yapıyoruz
-            echo "CONFIG_APATCH=y" >> arch/arm64/configs/${{ inputs.DEFCONFIG_NAME }}
+            # Buraya defconfig ayarlamaları gerekir, bu kısım kernele göre değişir!
+            
+        else
+            echo "Temiz kurulum, Root eklenmiyor."
         fi
 
-    - name: 🔧 Toolchain (Proton Clang)
+    - name: Toolchain İndir (Proton Clang Örneği)
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-    - name: 🔥 Derlemeyi Başlat
+    - name: Derlemeyi Başlat (Make)
       working-directory: android_kernel
       run: |
         export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
@@ -71,24 +72,21 @@ jobs:
         export SUBARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CC=clang
-        export CLANG_TRIPLE=aarch64-linux-gnu-
         
-        # Defconfig dosyasını yüklüyoruz
-        make O=out ${{ inputs.DEFCONFIG_NAME }}
+        # NOT: Aşağıdaki 'defconfig' adını senin cihaza göre değiştirmen lazım!
+        make O=out vendor_cepheus_defconfig 
         
-        # Derleme komutu
-        make O=out -j$(nproc --all) \
-            LLVM=1 \
-            LLVM_IAS=1
+        # KernelSU/APatch seçildiyse config'e ekleme yapılması gerekebilir
+        if [ "${{ inputs.ROOT_METHOD }}" != "None" ]; then
+            echo "CONFIG_KSU=y" >> out/.config
+            # APatch için CONFIG_APATCH=y vs.
+        fi
+        
+        make O=out -j$(nproc --all)
 
-    - name: 📤 Sonucu Paketle
-      if: success()
+    - name: Dosyayı Paketle ve Yükle
       uses: actions/upload-artifact@v4
       with:
         name: Kernel-${{ inputs.ROOT_METHOD }}
-        path: |
-          android_kernel/out/arch/arm64/boot/Image*
-          android_kernel/out/arch/arm64/boot/*.dtb
-          android_kernel/out/arch/arm64/boot/*.gz
-        path: out/arch/arm64/boot/Image.gz-dtb # Veya çıkan zip nerede oluşuyorsa
+        path: android_kernel/out/arch/arm64/boot/Image*
         
