@@ -28,13 +28,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # KRİTİK DEĞİŞİKLİK: Ubuntu 22.04 yerine 20.04 kullanıyoruz (OpenSSL uyumu için)
+    runs-on: ubuntu-20.04
     
     steps:
     - name: 📦 Ortamı Hazırla
       run: |
         sudo apt-get update
-        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+        # dwarves (pahole için) ve cpio eklendi, libssl-dev zaten 1.1 gelecek
+        sudo apt-get install -y git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio
         
     - name: 📥 Kernel Kaynağını Çek
       run: |
@@ -72,23 +74,21 @@ jobs:
         # 1. Config dosyasını oluştur
         make O=out ${{ inputs.DEFCONFIG_NAME }}
         
-        # 2. 🔥 KRİTİK DÜZELTME: Samsung'un hatalı dosya yollarını temizle
-        # Whitelist kontrolünü kapatıyoruz çünkü dosya yok
+        # 2. Samsung temizliği (Whitelist hatası için)
         sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
-        # Hatalı /home/dpi/... yolunu siliyoruz
         sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=""/g' out/.config
         
-        # 3. Root ayarlarını config'e işle
+        # 3. Root ayarlarını işle
         if [ "${{ inputs.ROOT_METHOD }}" == "APatch" ]; then
             echo "CONFIG_APATCH=y" >> out/.config
         elif [ "${{ inputs.ROOT_METHOD }}" != "None" ]; then
             echo "CONFIG_KSU=y" >> out/.config
         fi
 
-        # 4. Eksik soruları otomatik cevapla (Error in reading EOF hatası için)
+        # 4. Otomatik cevaplama
         make O=out olddefconfig
 
-        # 5. Son vuruşu yap (Derle)
+        # 5. Derle
         make O=out -j$(nproc --all) \
             LLVM=1 \
             LLVM_IAS=1
