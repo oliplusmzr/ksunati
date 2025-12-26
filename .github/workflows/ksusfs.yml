@@ -1,4 +1,4 @@
-name: Ksunati SUSFS
+name: Ksunati Susfs
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ on:
         - KOWX712-KSU
         - APatch
       USE_SUSFS:
-        description: '👻 SuSFS (Hayalet Modu) Eklensin mi? (Riskli)'
+        description: '👻 SuSFS (Riskli - Bootloop Yapabilir)'
         required: true
         type: boolean
         default: false
@@ -42,14 +42,13 @@ jobs:
     - name: 📥 Kaynak Kodları Çek
       run: |
         rm -rf android_kernel
-        # Link düzeltmece
         if [[ "${{ inputs.KERNEL_REPO }}" == http* ]]; then
             git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
         else
             git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} https://github.com/${{ inputs.KERNEL_REPO }} android_kernel
         fi
 
-    - name: 🐳 Docker ile Derle (SuSFS Entegreli)
+    - name: 🐳 Docker ile Derle (Güvenlikler İptal)
       run: |
         chmod -R 777 android_kernel
         
@@ -70,22 +69,12 @@ jobs:
             if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
                 echo '👻 SuSFS Yamaları İndiriliyor...'
                 git clone https://gitlab.com/simonpunk/susfs4ksu.git
-                
-                # 1. Dosyaları kopyala
-                # Eğer kopyalama hatası verirse durmasın diye || true ekledik
                 cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
                 cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
                 
-                # 2. Yamaları (Patch) Uygula
-                # Kernel 5.10 yamalarını deniyoruz
-                echo '🩹 Yamalar uygulanıyor...'
-                # Patch dosyalarını sırayla uygula, hata verirse log basıp devam et
                 for patch in susfs4ksu/kernel_patches/50_gki/*.patch; do
-                    echo \"Uygulanıyor: \$patch\"
-                    patch -p1 < \"\$patch\" || echo \"⚠️ YAMA HATASI: \$patch uygulanamadı (Çakışma olabilir)\"
+                    patch -p1 < \"\$patch\" || echo \"⚠️ YAMA HATASI: \$patch uygulanamadı\"
                 done
-                
-                # Yama uygulanamasa bile devam et, belki elle config yeterlidir
             fi
             # -----------------------
 
@@ -117,25 +106,34 @@ jobs:
             export HOSTLDFLAGS='-fcommon'
             export KCFLAGS='-w' 
 
-            echo '⚙️ Config: ${{ inputs.DEFCONFIG_NAME }}'
+            echo '⚙️ Config Hazırlanıyor: ${{ inputs.DEFCONFIG_NAME }}'
             make O=out ${{ inputs.DEFCONFIG_NAME }}
             
-            echo '🧹 Samsung Temizliği...'
+            # 🔥 KRİTİK BÖLÜM: SAMSUNG GÜVENLİK TEMİZLİĞİ 🔥
+            echo '🧹 Samsung KNOX/RKP/Security İptal Ediliyor...'
+            
+            # Whitelist hatası fix
             sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
             sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=\"\"/g' out/.config
             
-            # Root ve SuSFS Configleri
+            # BOOTLOOP ÖNLEYİCİLER (Bunlar Açık Kalırsa Telefon Açılmaz)
+            sed -i 's/CONFIG_SEC_SAMSUNG_RKP=y/CONFIG_SEC_SAMSUNG_RKP=n/g' out/.config
+            sed -i 's/CONFIG_KNOX_KAP=y/CONFIG_KNOX_KAP=n/g' out/.config
+            sed -i 's/CONFIG_SECURITY_DEFEX=y/CONFIG_SECURITY_DEFEX=n/g' out/.config
+            sed -i 's/CONFIG_PROCA=y/CONFIG_PROCA=n/g' out/.config
+            sed -i 's/CONFIG_UH_RKP=y/CONFIG_UH_RKP=n/g' out/.config
+            sed -i 's/CONFIG_RKP_KDP=y/CONFIG_RKP_KDP=n/g' out/.config
+            
+            # Root Ayarları
             if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
                 echo 'CONFIG_APATCH=y' >> out/.config
             elif [ '${{ inputs.ROOT_METHOD }}' != 'None' ]; then
                 echo 'CONFIG_KSU=y' >> out/.config
             fi
             
-            # SuSFS Seçildiyse Confige Ekle
             if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
                 echo 'CONFIG_SUSFS=y' >> out/.config
                 echo 'CONFIG_KSU_SUSFS=y' >> out/.config
-                echo 'CONFIG_KSU_SUSFS_SUS_PATH=y' >> out/.config
             fi
             
             make O=out olddefconfig
@@ -148,7 +146,7 @@ jobs:
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-${{ inputs.ROOT_METHOD }}-SuSFS-${{ inputs.USE_SUSFS }}
+        name: Kernel-${{ inputs.ROOT_METHOD }}-Fix
         path: |
           android_kernel/out/arch/arm64/boot/Image*
           android_kernel/out/arch/arm64/boot/*.dtb
