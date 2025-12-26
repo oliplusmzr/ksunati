@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       KERNEL_REPO:
-        description: 'Kernel Kaynak Linki'
+        description: 'Kernel Kaynak Linki (Kullanıcı/Repo)'
         required: true
-        default: 'https://github.com/oliplusmzr/android_kernel_samsung_a24'
+        default: 'oliplusmzr/android_kernel_samsung_a24'
       KERNEL_BRANCH:
         description: 'Branch Adı'
         required: true
@@ -16,7 +16,7 @@ on:
         required: true
         default: 'a24_defconfig'
       ROOT_METHOD:
-        description: 'Root Yöntemi'
+        description: 'Root Yöntemi (Yeni Seçenekler Eklendi)'
         required: true
         default: 'KernelSU-Next'
         type: choice
@@ -24,6 +24,9 @@ on:
         - None
         - KernelSU
         - KernelSU-Next
+        - SukiSU-Ultra
+        - Wild-KSU
+        - KOWX712-KSU
         - APatch
 
 jobs:
@@ -31,52 +34,71 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: 📥 Kaynak Kodları Çek
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ inputs.KERNEL_REPO }}
-        ref: ${{ inputs.KERNEL_BRANCH }}
-        path: android_kernel
-        fetch-depth: 1
+    - name: 📥 Kaynak Kodları Çek (Link Desteği)
+      run: |
+        rm -rf android_kernel
+        # Hazır araç yerine manuel clone, her türlü linki yer
+        # Eğer tam link girersen çalışır, kullanıcı/repo girersen başına https ekleriz
+        if [[ "${{ inputs.KERNEL_REPO }}" == http* ]]; then
+            git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
+        else
+            git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} https://github.com/${{ inputs.KERNEL_REPO }} android_kernel
+        fi
 
     - name: 🐳 Docker ile Derle (Tam Yetkili)
       run: |
-        # Klasör izinlerini herkesin erişebileceği hale getir
+        # Klasör izinlerini ayarla
         chmod -R 777 android_kernel
         
         # Docker'ı başlatıyoruz
         docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
-            # 1. Paketleri Güncelle ve Kur
             echo '📦 Paketler Kuruluyor...'
             apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
             libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio \
             wget curl kmod ca-certificates python2 python3
             
-            # Python ayarı (Eski kerneller python2 isteyebilir)
+            # Python ayarı
             ln -sf /usr/bin/python2 /usr/bin/python
             
-            # 2. Git Güvenlik Ayarı (HAYAT KURTARAN HAMLE)
+            # Git Güvenlik Ayarı
             git config --global --add safe.directory '*'
             git config --global --add safe.directory /kernel
             
             cd /kernel
             
-            # 3. Root Yöntemini Kur
-            echo '🛠️ Root Yöntemi: ${{ inputs.ROOT_METHOD }}'
+            echo '🛠️ Root Yöntemi Entegre Ediliyor: ${{ inputs.ROOT_METHOD }}'
+            
+            # --- ROOT SEÇİM MENÜSÜ ---
             if [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU' ]; then
+                echo '-> Orijinal KernelSU Kuruluyor...'
                 curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
+                
             elif [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU-Next' ]; then
+                echo '-> KernelSU-Next Kuruluyor...'
                 curl -LSs 'https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh' | bash -
+                
+            elif [ '${{ inputs.ROOT_METHOD }}' = 'SukiSU-Ultra' ]; then
+                echo '-> SukiSU-Ultra Kuruluyor...'
+                curl -LSs 'https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh' | bash -
+                
+            elif [ '${{ inputs.ROOT_METHOD }}' = 'Wild-KSU' ]; then
+                echo '-> Wild KernelSU Kuruluyor...'
+                curl -LSs 'https://raw.githubusercontent.com/WildKernels/Wild_KSU/main/kernel/setup.sh' | bash -
+            
+            elif [ '${{ inputs.ROOT_METHOD }}' = 'KOWX712-KSU' ]; then
+                echo '-> KOWX712 KernelSU Kuruluyor...'
+                curl -LSs 'https://raw.githubusercontent.com/KOWX712/KernelSU/main/kernel/setup.sh' | bash -
+                
             elif [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
+                echo '-> APatch Kuruluyor...'
                 git clone https://github.com/bmax121/APatch drivers/apatch
             fi
+            # -------------------------
 
-            # 4. Toolchain İndir
             echo '🔧 Toolchain İndiriliyor...'
             git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-            # Ortam Değişkenleri
             export PATH=/kernel/clang/bin:\$PATH
             export ARCH=arm64
             export SUBARCH=arm64
@@ -87,10 +109,8 @@ jobs:
             # Hata Önleyiciler
             export HOSTCFLAGS='-fcommon'
             export HOSTLDFLAGS='-fcommon'
-            # KCFLAGS=-w : Uyarıları hata olarak görme (Werror kapatır)
             export KCFLAGS='-w' 
 
-            # 5. Config ve Temizlik
             echo '⚙️ Config: ${{ inputs.DEFCONFIG_NAME }}'
             make O=out ${{ inputs.DEFCONFIG_NAME }}
             
@@ -102,12 +122,12 @@ jobs:
             if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
                 echo 'CONFIG_APATCH=y' >> out/.config
             elif [ '${{ inputs.ROOT_METHOD }}' != 'None' ]; then
+                # SukiSU, Wild, Next hepsi CONFIG_KSU kullanır
                 echo 'CONFIG_KSU=y' >> out/.config
             fi
             
             make O=out olddefconfig
             
-            # 6. Derleme (Ateşle!)
             echo '🔥 DERLEME BAŞLIYOR...'
             make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
         "
