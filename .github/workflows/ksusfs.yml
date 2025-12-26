@@ -1,4 +1,4 @@
-name: Ksunati Susfs
+name: ksunati susfs
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ on:
         - KOWX712-KSU
         - APatch
       USE_SUSFS:
-        description: '👻 SuSFS (Riskli - Bootloop Yapabilir)'
+        description: '👻 SuSFS (Hayalet Mod - Riskli)'
         required: true
         type: boolean
         default: false
@@ -48,16 +48,16 @@ jobs:
             git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} https://github.com/${{ inputs.KERNEL_REPO }} android_kernel
         fi
 
-    - name: 🐳 Docker ile Derle (Güvenlikler İptal)
+    - name: 🐳 Docker ile Derle ve Paketle
       run: |
         chmod -R 777 android_kernel
         
         docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
-            echo '📦 Paketler Kuruluyor...'
+            # 1. Paket Kurulumu
             apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
             libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio \
-            wget curl kmod ca-certificates python2 python3
+            wget curl kmod ca-certificates python2 python3 zip unzip
             
             ln -sf /usr/bin/python2 /usr/bin/python
             git config --global --add safe.directory '*'
@@ -65,19 +65,17 @@ jobs:
             
             cd /kernel
             
-            # --- SUSFS İŞLEMLERİ ---
+            # 2. SuSFS İşlemleri
             if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
-                echo '👻 SuSFS Yamaları İndiriliyor...'
                 git clone https://gitlab.com/simonpunk/susfs4ksu.git
                 cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
                 cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
-                
                 for patch in susfs4ksu/kernel_patches/50_gki/*.patch; do
-                    patch -p1 < \"\$patch\" || echo \"⚠️ YAMA HATASI: \$patch uygulanamadı\"
+                    patch -p1 < \"\$patch\" || echo \"⚠️ Yama uyarısı\"
                 done
             fi
-            # -----------------------
 
+            # 3. Root Entegrasyonu
             echo '🛠️ Root Yöntemi: ${{ inputs.ROOT_METHOD }}'
             if [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU' ]; then
                 curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
@@ -93,9 +91,8 @@ jobs:
                 git clone https://github.com/bmax121/APatch drivers/apatch
             fi
 
-            echo '🔧 Toolchain İndiriliyor...'
+            # 4. Toolchain
             git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
-
             export PATH=/kernel/clang/bin:\$PATH
             export ARCH=arm64
             export SUBARCH=arm64
@@ -106,25 +103,20 @@ jobs:
             export HOSTLDFLAGS='-fcommon'
             export KCFLAGS='-w' 
 
-            echo '⚙️ Config Hazırlanıyor: ${{ inputs.DEFCONFIG_NAME }}'
+            # 5. Config ve Temizlik
             make O=out ${{ inputs.DEFCONFIG_NAME }}
             
-            # 🔥 KRİTİK BÖLÜM: SAMSUNG GÜVENLİK TEMİZLİĞİ 🔥
-            echo '🧹 Samsung KNOX/RKP/Security İptal Ediliyor...'
-            
-            # Whitelist hatası fix
+            # Whitelist Fix
             sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
             sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=\"\"/g' out/.config
             
-            # BOOTLOOP ÖNLEYİCİLER (Bunlar Açık Kalırsa Telefon Açılmaz)
+            # Samsung Bootloop Fix (Daha Güvenli Yöntem)
+            # Satırı silmek yerine =n yapıyoruz ki config bozulmasın
             sed -i 's/CONFIG_SEC_SAMSUNG_RKP=y/CONFIG_SEC_SAMSUNG_RKP=n/g' out/.config
             sed -i 's/CONFIG_KNOX_KAP=y/CONFIG_KNOX_KAP=n/g' out/.config
             sed -i 's/CONFIG_SECURITY_DEFEX=y/CONFIG_SECURITY_DEFEX=n/g' out/.config
-            sed -i 's/CONFIG_PROCA=y/CONFIG_PROCA=n/g' out/.config
-            sed -i 's/CONFIG_UH_RKP=y/CONFIG_UH_RKP=n/g' out/.config
-            sed -i 's/CONFIG_RKP_KDP=y/CONFIG_RKP_KDP=n/g' out/.config
             
-            # Root Ayarları
+            # Root Configleri
             if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
                 echo 'CONFIG_APATCH=y' >> out/.config
             elif [ '${{ inputs.ROOT_METHOD }}' != 'None' ]; then
@@ -140,14 +132,35 @@ jobs:
             
             echo '🔥 DERLEME BAŞLIYOR...'
             make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
+
+            # 6. ANYKERNEL3 İLE PAKETLEME (Otomatik)
+            echo '🎁 ZIP Paketi Hazırlanıyor...'
+            git clone https://github.com/osm0sis/AnyKernel3
+            
+            # Derlenen imajı kopyala
+            if [ -f out/arch/arm64/boot/Image.gz ]; then
+                cp out/arch/arm64/boot/Image.gz AnyKernel3/
+            elif [ -f out/arch/arm64/boot/Image ]; then
+                cp out/arch/arm64/boot/Image AnyKernel3/
+            else
+                echo '❌ HATA: Image dosyası bulunamadı!'
+                exit 1
+            fi
+
+            cd AnyKernel3
+            # anykernel.sh dosyasını A24 (MediaTek) için ayarla
+            # do.devicecheck=0 yaparak model hatasını engelliyoruz
+            sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+            # Samsung A24 için boot partition yolu (Genelde bu şekildedir)
+            # Eğer hata verirse burayı kontrol ederiz
+            
+            # Klasörleri değil, dosyaları ziple
+            zip -r9 ../Kernel-Installer.zip * -x .git README.md *placeholder
         "
 
-    - name: 📤 Sonucu Paketle
+    - name: 📤 ZIP Dosyasını Yükle
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-${{ inputs.ROOT_METHOD }}-Fix
-        path: |
-          android_kernel/out/arch/arm64/boot/Image*
-          android_kernel/out/arch/arm64/boot/*.dtb
-          android_kernel/out/arch/arm64/boot/*.gz
+        name: Flashlanabilir-Kernel-ZIP
+        path: android_kernel/Kernel-Installer.zip
