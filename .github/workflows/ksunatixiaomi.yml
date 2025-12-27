@@ -6,15 +6,15 @@ on:
       KERNEL_REPO:
         description: 'Kernel Kaynak Linki'
         required: true
-        default: 'https://github.com/AdithyaR-0/Surya_Kernel_4.14' # Örnek Surya linki
+        default: 'oliplusmzr/android_kernel_samsung_a24'
       KERNEL_BRANCH:
         description: 'Branch Adı'
         required: true
-        default: 'master'
+        default: 'OSRC'
       DEFCONFIG_NAME:
-        description: 'Defconfig (Genelde surya_defconfig)'
+        description: 'Defconfig Dosya Adı'
         required: true
-        default: 'surya_defconfig'
+        default: 'a24_defconfig'
       ROOT_METHOD:
         description: 'Root Yöntemi'
         required: true
@@ -53,7 +53,6 @@ jobs:
         chmod -R 777 android_kernel
         
         docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
-            # 1. Araçları Kur
             echo '📦 Paketler Kuruluyor...'
             apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
@@ -66,17 +65,17 @@ jobs:
             
             cd /kernel
             
-            # 2. SuSFS
+            # --- SuSFS ---
             if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
                 git clone https://gitlab.com/simonpunk/susfs4ksu.git
                 cp -r susfs4ksu/kernel_patches/fs/* fs/ || true
                 cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/ || true
                 for patch in susfs4ksu/kernel_patches/50_gki/*.patch; do
-                    patch -p1 < \"\$patch\" || echo \"⚠️ Yama uyarısı\"
+                    patch -p1 < \"\$patch\" || echo \"⚠️ Yama hatası\"
                 done
             fi
 
-            # 3. Root Yöntemi
+            # --- Root ---
             echo '🛠️ Root Yöntemi: ${{ inputs.ROOT_METHOD }}'
             if [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU' ]; then
                 curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
@@ -92,7 +91,7 @@ jobs:
                 git clone https://github.com/bmax121/APatch drivers/apatch
             fi
 
-            # 4. Toolchain (Proton Clang)
+            # --- Toolchain ---
             git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
             export PATH=/kernel/clang/bin:\$PATH
             export ARCH=arm64
@@ -104,13 +103,14 @@ jobs:
             export HOSTLDFLAGS='-fcommon'
             export KCFLAGS='-w' 
 
-            # 5. Config
-            echo '⚙️ Config: ${{ inputs.DEFCONFIG_NAME }}'
+            # --- Config ---
             make O=out ${{ inputs.DEFCONFIG_NAME }}
             
-            # --- SAMSUNG KODLARI SİLİNDİ, BURASI TEMİZ ---
+            # Whitelist Fix (Bu şart, ama diğerlerini sildim)
+            sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
+            sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=\"\"/g' out/.config
             
-            # Root Configleri
+            # Root Ayarları
             if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
                 echo 'CONFIG_APATCH=y' >> out/.config
             elif [ '${{ inputs.ROOT_METHOD }}' != 'None' ]; then
@@ -127,36 +127,31 @@ jobs:
             echo '🔥 DERLEME BAŞLIYOR...'
             make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
 
-            # 6. AnyKernel3 (Xiaomi/Generic Mod)
-            echo '🎁 ZIP Paketi Hazırlanıyor...'
+            # --- Paketleme ---
+            echo '🎁 ZIP Hazırlanıyor...'
             git clone https://github.com/osm0sis/AnyKernel3
             
-            # Dosya bulma
+            # Ne çıkarsa bahtımıza (Image.gz-dtb veya Image.gz)
             if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-                cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+                cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image.gz ]; then
-                cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+                cp out/arch/arm64/boot/Image.gz AnyKernel3/
             elif [ -f out/arch/arm64/boot/Image ]; then
-                cp out/arch/arm64/boot/Image AnyKernel3/Image
+                cp out/arch/arm64/boot/Image AnyKernel3/
             else
-                echo '❌ Image dosyası bulunamadı!'
+                echo '❌ HATA: Derleme başarısız, dosya yok!'
                 exit 1
             fi
 
             cd AnyKernel3
-            # Cihaz kontrolünü kapatıyoruz, her cihaza uysun
             sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-            
-            # Samsung için yaptığımız özel path ayarını kaldırdık.
-            # AnyKernel3 otomatik olarak Snapdragon'u tanır.
-            
-            zip -r9 ../Kernel-Installer-Surya.zip * -x .git README.md *placeholder
+            zip -r9 ../Kernel-Installer.zip * -x .git README.md *placeholder
         "
 
-    - name: 📤 ZIP Dosyasını Yükle
+    - name: 📤 ZIP Yükle
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: Surya-Kernel-ZIP
-        path: android_kernel/Kernel-Installer-Surya.zip
+        name: Flashlanabilir-Kernel-ZIP
+        path: android_kernel/Kernel-Installer.zip
         
