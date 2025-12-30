@@ -161,16 +161,21 @@ jobs:
             
             # Xiaomi genelde Image.gz-dtb sever, Samsung Image.gz sever.
             # Hepsini dener hangisi varsa onu alır.
+            # --- Paketleme Kısmı (Düzeltilmiş) ---
             if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-                echo '✅ Image.gz-dtb bulundu (Xiaomi Style)'
-                cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+                echo '✅ DTB Kuyruklu Kernel Bulundu (MediaTek İlacı)'
+                # İsmini değiştirip kopyalıyoruz ki AnyKernel şaşırmasın
+                cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image.gz ]; then
-                echo '✅ Image.gz bulundu (Samsung/Pixel Style)'
+                echo '✅ Standart Image.gz Bulundu'
                 cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image ]; then
-                echo '✅ Image bulundu'
-                cp out/arch/arm64/boot/Image AnyKernel3/Image
+                echo '✅ Saf Image Bulundu'
+                cp out/arch/arm64/boot/Image AnyKernel3/Image.gz
             else
+                echo '❌ HATA: Ortada kernel mernel yok!'
+                exit 1
+            fi
                 echo '❌ HATA: Hiçbir kernel dosyası üretilemedi!'
                 exit 1
             fi
