@@ -176,34 +176,43 @@ jobs:
             echo '🔥 DERLEME BAŞLIYOR (Çekirdekler Isınsın)...'
             make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
 
-            # --- 7. Paketleme (Ne çıkarsa bahtımıza) ---
+# --- 7. Paketleme (A24 İçin Düzeltilmiş) ---
             echo '🎁 Akıllı Paketleme Başlıyor...'
             git clone https://github.com/osm0sis/AnyKernel3
             
-            # Xiaomi genelde Image.gz-dtb sever, Samsung Image.gz sever.
-            # Hepsini dener hangisi varsa onu alır.
-            # --- Paketleme Kısmı (Düzeltilmiş) ---
+            # Kernel Dosyasını Yakala ve İsimlendir
             if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-                echo '✅ DTB Kuyruklu Kernel Bulundu (MediaTek İlacı)'
-                # İsmini değiştirip kopyalıyoruz ki AnyKernel şaşırmasın
+                echo '✅ Image.gz-dtb (MediaTek) Bulundu'
                 cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image.gz ]; then
-                echo '✅ Standart Image.gz Bulundu'
+                echo '✅ Image.gz (Standart) Bulundu'
                 cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image ]; then
-                echo '✅ Saf Image Bulundu'
+                echo '✅ Image (Saf) Bulundu'
                 cp out/arch/arm64/boot/Image AnyKernel3/Image.gz
             else
-                echo '❌ HATA: Ortada kernel mernel yok!'
-                exit 1
-            fi
-                echo '❌ HATA: Hiçbir kernel dosyası üretilemedi!'
+                echo '❌ HATA: Kernel dosyası yok! Derleme başarısız olmuş.'
                 exit 1
             fi
 
             cd AnyKernel3
-            # Cihaz kontrolünü kapatıyoruz ki her telefona flashlansın
+            
+            # --- HAYAT KURTARAN AYARLAR BURADA ---
+            
+            # 1. Cihaz kontrolünü kapat (Her modelde çalışsın)
             sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+            
+            # 2. Boot Partisyonunu Elle Göster (A24/MediaTek İçin Şart)
+            sed -i 's|block=auto|block=/dev/block/by-name/boot|g' anykernel.sh
+            
+            # 3. Samsung AVB Kilidini Kır (Bootloop Çözümü)
+            # Bu satır olmadan Samsung cihazlar açılmaz!
+            sed -i '/boot_attributes() {/a PATCH_VBMETA_FLAG=2;' anykernel.sh
+            
+            # 4. Magisk ile çakışmayı önle
+            sed -i 's/is_slot_device=0/is_slot_device=auto/g' anykernel.sh
+
+            # Zipleme
             zip -r9 ../Kernel-Installer.zip * -x .git README.md *placeholder
         "
 
