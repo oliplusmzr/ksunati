@@ -1,0 +1,125 @@
+name: GKI Kernel Builder (Samsung A24 & Universal)
+
+on:
+  workflow_dispatch:
+    inputs:
+      GKI_VERSION:
+        description: 'Kernel Sürümü (Cihazındaki kernel 5.10 ise dokunma)'
+        required: true
+        default: 'android12-5.10'
+        type: choice
+        options:
+        - android12-5.10
+        - android13-5.10
+        - android14-6.1
+      USE_KSU:
+        description: 'KernelSU İstiyor musun?'
+        required: true
+        type: boolean
+        default: true
+      USE_SUSFS:
+        description: '👻 SuSFS (Hayalet Mod) Eklensin mi?'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 📥 GKI Kaynaklarını Çek
+      run: |
+        echo "⬇️ Google GKI Kaynakları Çekiliyor..."
+        # KernelSU destekli hazır GKI reposunu kullanıyoruz (Daha stabil)
+        git clone --depth=1 -b ${{ inputs.GKI_VERSION }} https://github.com/WildKernels/android_kernel_gki.git android_kernel
+
+    - name: 🐳 Docker ile GKI Derleme
+      run: |
+        chmod -R 777 android_kernel
+        
+        docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
+            # 1. Paketler
+            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
+            libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio \
+            wget curl kmod ca-certificates python3 zip unzip
+            
+            cd /kernel
+            
+            # 2. SuSFS Entegrasyonu
+            if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
+                echo '👻 SuSFS Yamalanıyor...'
+                git clone https://gitlab.com/simonpunk/susfs4ksu.git
+                # GKI için otomatik yama
+                ./susfs4ksu/kernel_patches/50_gki/install_susfs_gki.sh || echo '⚠️ Yama Scripti Çalışmadı, Manuel deneniyor...'
+                # Manuel garanti yöntem
+                cp susfs4ksu/kernel_patches/50_gki/50_add_susfs_in_gki-${{ inputs.GKI_VERSION }}.patch . || true
+                patch -p1 < 50_add_susfs_in_gki-${{ inputs.GKI_VERSION }}.patch || true
+                cp -r susfs4ksu/kernel_patches/fs/* fs/
+                cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
+            fi
+
+            # 3. KernelSU (Zaten repoda varsa gerek yok ama garanti olsun)
+            if [ '${{ inputs.USE_KSU }}' = 'true' ]; then
+                echo '🛠️ KernelSU Ayarlanıyor...'
+                curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
+            fi
+
+            # 4. Config Ayarları (GKI Standardı)
+            echo '⚙️ GKI Config...'
+            # GKI için 'gki_defconfig' kullanılır
+            make O=out gki_defconfig
+            
+            # Gerekli yamalar
+            if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
+                echo 'CONFIG_SUSFS=y' >> out/.config
+                echo 'CONFIG_KSU_SUSFS=y' >> out/.config
+            fi
+            
+            make O=out olddefconfig
+
+            # 5. Derleme
+            echo '🔥 GKI Derlemesi Başlıyor...'
+            # Toolchain GKI içinde genelde gelir veya Google'dan çekeriz
+            # Burada sistem GCC kullanıyoruz, GKI için genelde yeterlidir ama Clang önerilir.
+            # Hızlı çözüm için Google Prebuilt Clang çekelim:
+            git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+            export PATH=/kernel/clang/bin:\$PATH
+            
+            make O=out -j\$(nproc --all) \
+                ARCH=arm64 \
+                CC=clang \
+                CROSS_COMPILE=aarch64-linux-gnu- \
+                CLANG_TRIPLE=aarch64-linux-gnu- \
+                Image Image.gz
+
+            # 6. Paketleme
+            echo '🎁 Paketleme...'
+            git clone https://github.com/osm0sis/AnyKernel3
+            
+            # GKI'da sadece Image.gz veya Image yeterlidir, DTB cihazda zaten vardır.
+            if [ -f out/arch/arm64/boot/Image.gz ]; then
+                cp out/arch/arm64/boot/Image.gz AnyKernel3/
+            elif [ -f out/arch/arm64/boot/Image ]; then
+                cp out/arch/arm64/boot/Image AnyKernel3/
+            else
+                echo '❌ Kernel Yok!'
+                exit 1
+            fi
+
+            cd AnyKernel3
+            sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+            # GKI için boot partisyonu
+            sed -i 's|block=auto|block=/dev/block/by-name/boot|g' anykernel.sh
+            # AVB Patch
+            sed -i '/boot_attributes() {/a PATCH_VBMETA_FLAG=2;' anykernel.sh
+            
+            zip -r9 ../GKI-Kernel-Installer.zip * -x .git README.md *placeholder
+        "
+
+    - name: 📤 Yükle
+      uses: actions/upload-artifact@v4
+      with:
+        name: GKI-Kernel-A24
+        path: android_kernel/GKI-Kernel-Installer.zip
