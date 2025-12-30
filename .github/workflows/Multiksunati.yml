@@ -128,6 +128,27 @@ jobs:
             # --- 5. Config Ayarları (Evrensel) ---
             echo '⚙️ Defconfig Yükleniyor: ${{ inputs.DEFCONFIG_NAME }}'
             make O=out ${{ inputs.DEFCONFIG_NAME }}
+
+             # 1. Modül İmza Kontrolünü Kapat (Eski modülleri zorla yüklesin)
+            sed -i 's/CONFIG_MODVERSIONS=y/CONFIG_MODVERSIONS=n/g' out/.config
+            sed -i 's/CONFIG_MODULE_SIG=y/CONFIG_MODULE_SIG=n/g' out/.config
+            
+            # 2. Kernel Versiyonunu Orijinalle Eşitlemeye Çalış (Magic Version Hack)
+            # Bu satır çok kritiktir, cihazın orijinal kernel sürüm son ekini taklit eder.
+            # Eğer recovery logundaki "android12-9-..." kısmı sabitse buraya yaz.
+            # Ama en garantisi, Localversion'ı boşaltıp modül korumasını kapatmaktır.
+            sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/g' out/.config
+            sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/g' out/.config
+            
+            # 3. GKI Modül Yükleme Korumasını Kaldır
+            echo 'CONFIG_MODULE_FORCE_LOAD=y' >> out/.config
+            echo 'CONFIG_MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS=y' >> out/.config
+            echo 'CONFIG_MODULE_SIG_ALL=n' >> out/.config
+            echo 'CONFIG_MODULE_SIG_FORCE=n' >> out/.config
+
+            # 4. Samsung Güvenliklerini Tekrar Kontrol Et
+            sed -i 's/CONFIG_SEC_SAMSUNG_RKP=y/CONFIG_SEC_SAMSUNG_RKP=n/g' out/.config
+            sed -i 's/CONFIG_KNOX_KAP=y/CONFIG_KNOX_KAP=n/g' out/.config
             
             # Gereksiz kısıtlamaları kaldır
             sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
