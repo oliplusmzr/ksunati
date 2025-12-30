@@ -4,19 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       KERNEL_REPO:
-        description: 'Kernel Linki (Örn: kullanici/repo veya https://...)'
+        description: 'Kernel Linki (Kullanici/Repo)'
         required: true
         default: 'oliplusmzr/android_kernel_samsung_a24'
       KERNEL_BRANCH:
-        description: 'Branch (Örn: OSRC veya main)'
+        description: 'Branch Adi'
         required: true
         default: 'OSRC'
       DEFCONFIG_NAME:
-        description: 'Defconfig Dosyası (Örn: a24_defconfig veya vendor/surya_defconfig)'
+        description: 'Defconfig Dosyasi'
         required: true
         default: 'a24_defconfig'
       ROOT_METHOD:
-        description: 'Root Yöntemi'
+        description: 'Root Yontemi'
         required: true
         default: 'KernelSU-Next'
         type: choice
@@ -28,7 +28,7 @@ on:
         - Wild-KSU
         - APatch
       USE_SUSFS:
-        description: '👻 SuSFS (Otomatik Sürüm Tespiti)'
+        description: 'SuSFS (Hayalet Mod)'
         required: true
         type: boolean
         default: true
@@ -38,25 +38,23 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: 📥 Kaynak Kodları Çek
+    - name: Kaynak Kodlari Cek
       run: |
         rm -rf android_kernel
-        echo "⬇️ Hedef Repo: ${{ inputs.KERNEL_REPO }} -> ${{ inputs.KERNEL_BRANCH }}"
+        echo "Hedef Repo: ${{ inputs.KERNEL_REPO }} -> ${{ inputs.KERNEL_BRANCH }}"
         
-        # Link kontrolü (Tam link mi yoksa kullanıcı/repo mu?)
         if [[ "${{ inputs.KERNEL_REPO }}" == http* ]]; then
             git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} ${{ inputs.KERNEL_REPO }} android_kernel
         else
             git clone --depth=1 -b ${{ inputs.KERNEL_BRANCH }} https://github.com/${{ inputs.KERNEL_REPO }} android_kernel
         fi
 
-    - name: 🐳 Docker ile Akıllı Derleme
+    - name: Docker ile Akilli Derleme
       run: |
         chmod -R 777 android_kernel
         
         docker run --rm -v $PWD/android_kernel:/kernel ubuntu:20.04 bash -c "
-            # --- 1. Ortam Hazırlığı ---
-            echo '📦 Paketler Yükleniyor...'
+            echo 'Paketler Yukleniyor...'
             apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git bc bison flex libssl-dev build-essential libncurses5-dev libncurses5 \
             libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi dwarves cpio \
@@ -68,38 +66,37 @@ jobs:
             
             cd /kernel
             
-            # --- 2. Akıllı SuSFS (4.14 ve GKI Ayrımı) ---
+            # --- SuSFS Kontrolu ---
             if [ '${{ inputs.USE_SUSFS }}' = 'true' ]; then
-                echo '👻 SuSFS Kontrol Ediliyor...'
+                echo 'SuSFS Kontrol Ediliyor...'
                 
-                # Makefile'dan sürüm okuma
                 K_VER=\$(grep \"^VERSION =\" Makefile | awk '{print \$3}')
                 K_LVL=\$(grep \"^PATCHLEVEL =\" Makefile | awk '{print \$3}')
                 KERNEL_MAJOR=\"\$K_VER.\$K_LVL\"
-                echo \"🖥️ Tespit Edilen Kernel: \$KERNEL_MAJOR\"
+                echo \"Tespit Edilen Kernel: \$KERNEL_MAJOR\"
 
                 if [ \"\$KERNEL_MAJOR\" == \"4.14\" ]; then
-                    echo \"🔧 Eski Toprak (4.14) algılandı -> Legacy Yama\"
+                    echo \"Eski Toprak (4.14) algilandi -> Legacy Yama\"
                     git clone -b kernel-4.14 https://gitlab.com/simonpunk/susfs4ksu.git
                     cp -r susfs4ksu/kernel_patches/fs/* fs/
                     cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
-                    patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || echo '❌ Yama Hatası (4.14)'
+                    patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || echo 'Yama Hatasi (4.14)'
 
                 elif [ \"\$KERNEL_MAJOR\" == \"5.10\" ] || [ \"\$KERNEL_MAJOR\" == \"5.15\" ]; then
-                    echo \"🚀 Yeni Nesil (GKI) algılandı -> GKI Yama\"
+                    echo \"Yeni Nesil (GKI) algilandi -> GKI Yama\"
                     git clone -b gki-android12-5.10 https://gitlab.com/simonpunk/susfs4ksu.git
                     cp -r susfs4ksu/kernel_patches/fs/* fs/
                     cp -r susfs4ksu/kernel_patches/include/linux/* include/linux/
                     for patch in susfs4ksu/kernel_patches/50_gki/*.patch; do
-                        patch -p1 < \"\$patch\" || echo \"⚠️ GKI Yama Uyarısı\"
+                        patch -p1 < \"\$patch\" || echo \"GKI Yama Uyarisi\"
                     done
                 else
-                    echo \"⚠️ Bu kernel sürümü (\$KERNEL_MAJOR) için otomatik SuSFS yok. Pas geçiliyor.\"
+                    echo \"Bu kernel surumu (\$KERNEL_MAJOR) icin otomatik SuSFS yok. Pas geciliyor.\"
                 fi
             fi
 
-            # --- 3. Root Entegrasyonu ---
-            echo '🛠️ Root Yöntemi: ${{ inputs.ROOT_METHOD }}'
+            # --- Root Entegrasyonu ---
+            echo 'Root Yontemi: ${{ inputs.ROOT_METHOD }}'
             if [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU' ]; then
                 curl -LSs 'https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh' | bash -
             elif [ '${{ inputs.ROOT_METHOD }}' = 'KernelSU-Next' ]; then
@@ -112,8 +109,8 @@ jobs:
                 git clone https://github.com/bmax121/APatch drivers/apatch
             fi
 
-            # --- 4. Toolchain (Proton Clang) ---
-            echo '🔧 Toolchain Kuruluyor...'
+            # --- Toolchain ---
+            echo 'Toolchain Kuruluyor...'
             git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
             export PATH=/kernel/clang/bin:\$PATH
             export ARCH=arm64
@@ -125,38 +122,27 @@ jobs:
             export HOSTLDFLAGS='-fcommon'
             export KCFLAGS='-w' 
 
-            # --- 5. Config Ayarları (Evrensel) ---
-            echo '⚙️ Defconfig Yükleniyor: ${{ inputs.DEFCONFIG_NAME }}'
+            # --- Config Ayarlari ---
+            echo 'Defconfig Yukleniyor: ${{ inputs.DEFCONFIG_NAME }}'
             make O=out ${{ inputs.DEFCONFIG_NAME }}
 
-             # 1. Modül İmza Kontrolünü Kapat (Eski modülleri zorla yüklesin)
+            # Modul imza hatalarini engelle
             sed -i 's/CONFIG_MODVERSIONS=y/CONFIG_MODVERSIONS=n/g' out/.config
             sed -i 's/CONFIG_MODULE_SIG=y/CONFIG_MODULE_SIG=n/g' out/.config
-            
-            # 2. Kernel Versiyonunu Orijinalle Eşitlemeye Çalış (Magic Version Hack)
-            # Bu satır çok kritiktir, cihazın orijinal kernel sürüm son ekini taklit eder.
-            # Eğer recovery logundaki "android12-9-..." kısmı sabitse buraya yaz.
-            # Ama en garantisi, Localversion'ı boşaltıp modül korumasını kapatmaktır.
-            sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=""/g' out/.config
+            sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"\"/g' out/.config
             sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/g' out/.config
             
-            # 3. GKI Modül Yükleme Korumasını Kaldır
+            # GKI Modul yukleme korumasini kaldir
             echo 'CONFIG_MODULE_FORCE_LOAD=y' >> out/.config
             echo 'CONFIG_MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS=y' >> out/.config
             echo 'CONFIG_MODULE_SIG_ALL=n' >> out/.config
             echo 'CONFIG_MODULE_SIG_FORCE=n' >> out/.config
 
-            # 4. Samsung Güvenliklerini Tekrar Kontrol Et
+            # Samsung Guvenlik Duvarlarini Indir
             sed -i 's/CONFIG_SEC_SAMSUNG_RKP=y/CONFIG_SEC_SAMSUNG_RKP=n/g' out/.config
             sed -i 's/CONFIG_KNOX_KAP=y/CONFIG_KNOX_KAP=n/g' out/.config
-            
-            # Gereksiz kısıtlamaları kaldır
             sed -i 's/CONFIG_TRIM_UNUSED_KSYMS=y/CONFIG_TRIM_UNUSED_KSYMS=n/g' out/.config
             sed -i 's/CONFIG_UNUSED_KSYMS_WHITELIST=.*/CONFIG_UNUSED_KSYMS_WHITELIST=\"\"/g' out/.config
-            
-            # Samsung Güvenlik Duvarlarını İndir (Sadece varsa değiştirir)
-            sed -i 's/CONFIG_SEC_SAMSUNG_RKP=y/CONFIG_SEC_SAMSUNG_RKP=n/g' out/.config
-            sed -i 's/CONFIG_KNOX_KAP=y/CONFIG_KNOX_KAP=n/g' out/.config
             
             # Root Configleri
             if [ '${{ inputs.ROOT_METHOD }}' = 'APatch' ]; then
@@ -172,51 +158,43 @@ jobs:
             
             make O=out olddefconfig
             
-            # --- 6. Derleme ---
-            echo '🔥 DERLEME BAŞLIYOR (Çekirdekler Isınsın)...'
+            # --- Derleme ---
+            echo 'DERLEME BASLIYOR...'
             make O=out -j\$(nproc --all) LLVM=1 LLVM_IAS=1
 
-# --- 7. Paketleme (A24 İçin Düzeltilmiş) ---
-            echo '🎁 Akıllı Paketleme Başlıyor...'
+            # --- Paketleme ---
+            echo 'Akilli Paketleme Basliyor...'
             git clone https://github.com/osm0sis/AnyKernel3
             
-            # Kernel Dosyasını Yakala ve İsimlendir
             if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-                echo '✅ Image.gz-dtb (MediaTek) Bulundu'
+                echo 'Image.gz-dtb (MediaTek) Bulundu'
                 cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image.gz ]; then
-                echo '✅ Image.gz (Standart) Bulundu'
+                echo 'Image.gz (Standart) Bulundu'
                 cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
             elif [ -f out/arch/arm64/boot/Image ]; then
-                echo '✅ Image (Saf) Bulundu'
+                echo 'Image (Saf) Bulundu'
                 cp out/arch/arm64/boot/Image AnyKernel3/Image.gz
             else
-                echo ' HATA: Kernel dosyası yok! Derleme başarısız olmuş.'
+                echo 'HATA: Kernel dosyasi yok. Derleme basarisiz olmus.'
                 exit 1
             fi
 
             cd AnyKernel3
             
-            # --- HAYAT KURTARAN AYARLAR BURADA ---
-            
-            # 1. Cihaz kontrolünü kapat (Her modelde çalışsın)
+            # Cihaz kontrolunu kapat
             sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-            
-            # 2. Boot Partisyonunu Elle Göster (A24/MediaTek İçin Şart)
+            # Boot Partisyonunu Elle Goster (A24/MediaTek Icin Sart)
             sed -i 's|block=auto|block=/dev/block/by-name/boot|g' anykernel.sh
-            
-            # 3. Samsung AVB Kilidini Kır (Bootloop Çözümü)
-            # Bu satır olmadan Samsung cihazlar açılmaz!
+            # Samsung AVB Kilidini Kir (Bootloop Cozumu)
             sed -i '/boot_attributes() {/a PATCH_VBMETA_FLAG=2;' anykernel.sh
-            
-            # 4. Magisk ile çakışmayı önle
+            # Magisk cakismasini onle
             sed -i 's/is_slot_device=0/is_slot_device=auto/g' anykernel.sh
 
-            # Zipleme
             zip -r9 ../Kernel-Installer.zip * -x .git README.md *placeholder
         "
 
-    - name: 📤 Sonucu Teslim Et
+    - name: Sonucu Teslim Et
       if: success()
       uses: actions/upload-artifact@v4
       with:
