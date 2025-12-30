@@ -191,7 +191,7 @@ jobs:
                 echo '✅ Image (Saf) Bulundu'
                 cp out/arch/arm64/boot/Image AnyKernel3/Image.gz
             else
-                echo '❌ HATA: Kernel dosyası yok! Derleme başarısız olmuş.'
+                echo ' HATA: Kernel dosyası yok! Derleme başarısız olmuş.'
                 exit 1
             fi
 
